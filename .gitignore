@@ -1,0 +1,53 @@
+# 虚拟环境
+.venv/
+
+# IDE 配置
+.idea/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 测试缓存
+.pytest_cache/
+
+# 配置文件（含敏感信息，不上传）
+Conf/Confing.py
+Conf/api_path.py
+
+# 日志文件
+Logs/
+
+# IDE 工具文件
+.trae/
+
+# 数据库文件
+*.db
+
+# 造数Excel（含敏感测试数据）
+TestFile/mock/
+
+# 抓包工具输出报告（含接口敏感数据）
+Tool/抓包工具/output/
+
+# ====== 以下目录体积巨大，严禁上传到git仓库 ======
+# 第三方Python依赖包（约2936个文件，29MB），用 pip install -r requirements.txt 安装
+Tool/capture_tool/python_libs/
+
+# Edge浏览器运行数据（约1383个文件，50MB+），浏览器自动生成
+Tool/capture_tool/browser_data_edge/
+
+# Selenium缓存
+Tool/capture_tool/selenium_cache/
+
+# 抓包工具日志
+Tool/capture_tool/logs/
+
+# 抓包工具导出文件（保留.gitkeep目录结构）
+Tool/capture_tool/exports/*
+!Tool/capture_tool/exports/.gitkeep
+
+# 其他虚拟环境/依赖目录
+.venv/
+venv/
+node_modules/
