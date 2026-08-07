@@ -34,5 +34,7 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 测试用例Excel目录
 TEST_CASE_DIR = os.path.join(PROJECT_ROOT, "Data", "Test_case")
+# 测试报告目录（回写结果输出到这里）
+TEST_REPORT_DIR = os.path.join(PROJECT_ROOT, "Data", "Test_report")
 # 日志目录
 LOG_DIR = os.path.join(PROJECT_ROOT, "Logs")
