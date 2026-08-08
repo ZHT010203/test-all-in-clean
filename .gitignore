@@ -51,3 +51,6 @@ Tool/capture_tool/exports/*
 .venv/
 venv/
 node_modules/
+
+# 环境变量配置（含敏感信息，不提交 git）
+.env

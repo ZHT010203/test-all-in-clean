@@ -185,6 +185,23 @@ class HTTPClient:
 
         return url
 
+    def _resolve_value(self, value, context):
+        """
+        内部辅助方法：传 context 时对字符串做 resolve 替换，否则原样返回
+
+        Args:
+            value: 待处理的值（可能是字符串、int、bool等任意类型）
+            context: TestContext 实例，为 None 时直接返回原值
+
+        Returns:
+            替换后的值；非字符串类型或 context 为 None 时原样返回
+        """
+        if context is None:
+            return value
+        if isinstance(value, str):
+            return context.resolve(value)
+        return value
+
     @retry_on_network_error(max_retries=3)
     def request(
         self,
@@ -192,6 +209,7 @@ class HTTPClient:
         url: str,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
+        context=None,
         **kwargs
     ) -> requests.Response:
         """
@@ -202,6 +220,8 @@ class HTTPClient:
             url: 请求路径或完整URL
             headers: 自定义请求头（可选，会与默认请求头合并）
             timeout: 超时时间（秒），可选，默认使用实例配置的超时时间
+            context: TestContext 实例（可选），传入时对 url/json/data/params
+                     中的 ${var} 占位符做替换，支撑链路测试；不传时保持原逻辑
             **kwargs: 其他requests支持的参数（如json、data、params等）
 
         Returns:
@@ -216,7 +236,41 @@ class HTTPClient:
             - 自动记录请求和响应日志
             - 自动检查响应状态码
             - 支持自动重试（仅针对网络异常）
+            - context 不为 None 时，对 url/json/data/params 中的 ${var} 替换
         """
+        # 上下文变量替换：仅当 context 不为 None 时执行，向后兼容
+        if context is not None:
+            # url：替换路径里的 ${var}
+            url = context.resolve(url)
+
+            # json：dict 时遍历值替换字符串，非 dict 不动
+            json_body = kwargs.get('json')
+            if isinstance(json_body, dict):
+                kwargs['json'] = {
+                    k: self._resolve_value(v, context)
+                    for k, v in json_body.items()
+                }
+
+            # data：dict 时遍历值替换字符串；str 时直接 resolve
+            data_body = kwargs.get('data')
+            if isinstance(data_body, dict):
+                kwargs['data'] = {
+                    k: self._resolve_value(v, context)
+                    for k, v in data_body.items()
+                }
+            elif isinstance(data_body, str):
+                kwargs['data'] = context.resolve(data_body)
+
+            # params：dict 时遍历值替换字符串
+            params_body = kwargs.get('params')
+            if isinstance(params_body, dict):
+                kwargs['params'] = {
+                    k: self._resolve_value(v, context)
+                    for k, v in params_body.items()
+                }
+
+            logging.debug("🔧 已替换上下文变量")
+
         # 构建完整URL
         full_url = self._build_url(url)
 
@@ -294,6 +348,7 @@ class HTTPClient:
         url: str,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
+        context=None,
         **kwargs
     ) -> requests.Response:
         """
@@ -303,6 +358,7 @@ class HTTPClient:
             url: 请求路径或完整URL
             headers: 自定义请求头（可选）
             timeout: 超时时间（秒），可选
+            context: TestContext 实例（可选），传入时替换 ${var} 占位符
             **kwargs: 其他requests支持的参数（如params等）
 
         Returns:
@@ -311,13 +367,14 @@ class HTTPClient:
         示例：
             >>> response = client.get("/users", params={"page": 1})
         """
-        return self.request('GET', url, headers=headers, timeout=timeout, **kwargs)
+        return self.request('GET', url, headers=headers, timeout=timeout, context=context, **kwargs)
 
     def post(
         self,
         url: str,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
+        context=None,
         **kwargs
     ) -> requests.Response:
         """
@@ -327,6 +384,7 @@ class HTTPClient:
             url: 请求路径或完整URL
             headers: 自定义请求头（可选）
             timeout: 超时时间（秒），可选
+            context: TestContext 实例（可选），传入时替换 ${var} 占位符
             **kwargs: 其他requests支持的参数（如json、data等）
 
         Returns:
@@ -335,13 +393,14 @@ class HTTPClient:
         示例：
             >>> response = client.post("/users", json={"name": "张三"})
         """
-        return self.request('POST', url, headers=headers, timeout=timeout, **kwargs)
+        return self.request('POST', url, headers=headers, timeout=timeout, context=context, **kwargs)
 
     def put(
         self,
         url: str,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
+        context=None,
         **kwargs
     ) -> requests.Response:
         """
@@ -351,6 +410,7 @@ class HTTPClient:
             url: 请求路径或完整URL
             headers: 自定义请求头（可选）
             timeout: 超时时间（秒），可选
+            context: TestContext 实例（可选），传入时替换 ${var} 占位符
             **kwargs: 其他requests支持的参数（如json、data等）
 
         Returns:
@@ -359,13 +419,14 @@ class HTTPClient:
         示例：
             >>> response = client.put("/users/123", json={"name": "李四"})
         """
-        return self.request('PUT', url, headers=headers, timeout=timeout, **kwargs)
+        return self.request('PUT', url, headers=headers, timeout=timeout, context=context, **kwargs)
 
     def delete(
         self,
         url: str,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
+        context=None,
         **kwargs
     ) -> requests.Response:
         """
@@ -375,6 +436,7 @@ class HTTPClient:
             url: 请求路径或完整URL
             headers: 自定义请求头（可选）
             timeout: 超时时间（秒），可选
+            context: TestContext 实例（可选），传入时替换 ${var} 占位符
             **kwargs: 其他requests支持的参数
 
         Returns:
@@ -383,7 +445,7 @@ class HTTPClient:
         示例：
             >>> response = client.delete("/users/123")
         """
-        return self.request('DELETE', url, headers=headers, timeout=timeout, **kwargs)
+        return self.request('DELETE', url, headers=headers, timeout=timeout, context=context, **kwargs)
 
     def close(self) -> None:
         """

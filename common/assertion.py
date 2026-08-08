@@ -21,6 +21,28 @@
     ae.assert_not_empty("$.data.name", "品牌名")
     ae.assert_contains("$.message", "成功", "提示信息")
     brand = ae.find_in_list("$.data.list", "name", "万和")
+
+数据库断言（校验写接口后数据是否落库）:
+    from common.db_client import DBClient
+    db = DBClient(db_config)
+
+    # 方式1：初始化时传入 db_client
+    ae = AssertEngine(result, db_client=db)
+
+    # 方式2：调用时单独传 db（优先级高于初始化传入的）
+    ae.assert_db_record(
+        sql="SELECT id, name FROM pms_brand WHERE name = %s",
+        params=("万和",),
+        expected_dict={"name": "万和"},
+        测试点="新增品牌落库"
+    )
+
+    # 断言记录不存在（删除/取消后校验）
+    ae.assert_db_not_exists(
+        sql="SELECT id FROM pms_brand WHERE id = %s",
+        params=(999,),
+        测试点="删除品牌后记录不存在"
+    )
 """
 import logging
 
@@ -41,14 +63,17 @@ class AssertEngine:
         ae.assert_result("$.code=200;$.message=操作成功", "登录")
     """
 
-    def __init__(self, result):
+    def __init__(self, result, db_client=None):
         """
         初始化断言引擎
 
         Args:
             result: 接口返回的字典
+            db_client: 可选，DBClient 实例，用于数据库断言（assert_db_record / assert_db_not_exists）
+                       不传时为 None，调用 db 断言方法时需单独传 db 参数，否则报错
         """
         self.result = result
+        self.db_client = db_client
 
     def _extract(self, path):
         """
@@ -307,3 +332,123 @@ class AssertEngine:
 
         logger.warning(f"在 '{path}' 中未找到 {field}={value} 的数据")
         return None
+
+    def assert_db_record(self, sql, params, expected_dict, db=None, 测试点=""):
+        """
+        断言数据库中存在指定记录，并校验字段值是否一致
+
+        用 db.fetchone(sql, params) 查询，遍历 expected_dict 比对每个字段。
+        - 查不到记录（返回 None）：断言失败（记录不存在）
+        - 字段不存在于查询结果：断言失败
+        - 字段值不一致：断言失败，记录期望值和实际值
+        - 全部一致：通过
+
+        Args:
+            sql: SQL 查询语句（用 %s 占位）
+            params: SQL 参数元组
+            expected_dict: 期望字段值字典，如 {"name": "万和", "status": 1}
+            db: 可选，DBClient 实例；不传则用初始化时的 self.db_client；两者都为 None 则报错
+            测试点: 测试点名称（日志和报错提示用）
+
+        用法:
+            ae.assert_db_record(
+                sql="SELECT id, name FROM pms_brand WHERE name = %s",
+                params=("万和",),
+                expected_dict={"name": "万和"},
+                测试点="新增品牌落库"
+            )
+        """
+        # 选定 db 客户端：优先用入参 db，其次用初始化时传入的 self.db_client
+        db_client = db if db is not None else self.db_client
+        if db_client is None:
+            logger.error(f"[{测试点}] 数据库断言失败: 未提供 db_client")
+            assert False, f"[{测试点}] 未提供 db_client，无法执行数据库断言"
+
+        logger.debug(f"[{测试点}] 开始数据库记录断言, SQL={sql}, params={params}")
+
+        # 查询单条记录
+        record = db_client.fetchone(sql, params)
+
+        # 查询结果为 None：记录不存在，断言失败
+        if record is None:
+            logger.error(
+                f"[{测试点}] 数据库记录断言失败: 记录不存在, "
+                f"SQL={sql}, params={params}"
+            )
+            assert False, \
+                f"[{测试点}] 数据库记录不存在, SQL={sql}, params={params}, 期望={expected_dict}"
+
+        logger.debug(f"[{测试点}] 查询到记录: {record}")
+
+        # 遍历期望字段逐一比对
+        for field, expected_value in expected_dict.items():
+            # 字段不存在于查询结果
+            if field not in record:
+                logger.error(
+                    f"[{测试点}] 数据库记录断言失败: 字段不存在, "
+                    f"字段={field}, SQL={sql}, 实际记录={record}"
+                )
+                assert False, \
+                    f"[{测试点}] 字段不存在: {field}, SQL={sql}, 期望={expected_dict}, 实际记录={record}"
+
+            actual_value = record[field]
+            logger.debug(
+                f"[{测试点}] 字段比对: {field} 期望={expected_value}, 实际={actual_value}"
+            )
+
+            # 值不一致
+            if actual_value != expected_value:
+                logger.error(
+                    f"[{测试点}] 数据库记录断言失败: 字段值不一致, "
+                    f"字段={field}, 期望={expected_value}, 实际={actual_value}, "
+                    f"SQL={sql}"
+                )
+                assert False, \
+                    f"[{测试点}] 字段值不一致: 字段={field}, 期望={expected_value}, 实际={actual_value}, SQL={sql}"
+
+        # 全部一致，断言通过
+        logger.info(f"[{测试点}] 数据库记录断言通过, SQL={sql}, 期望={expected_dict}")
+
+    def assert_db_not_exists(self, sql, params, db=None, 测试点=""):
+        """
+        断言数据库中不存在指定记录（删除/取消等场景校验）
+
+        用 db.fetchone(sql, params) 查询：
+        - 查询结果不为 None：记录已存在，断言失败（不应存在）
+        - 查询结果为 None：记录不存在，符合预期，通过
+
+        Args:
+            sql: SQL 查询语句（用 %s 占位）
+            params: SQL 参数元组
+            db: 可选，DBClient 实例；不传则用初始化时的 self.db_client；两者都为 None 则报错
+            测试点: 测试点名称（日志和报错提示用）
+
+        用法:
+            ae.assert_db_not_exists(
+                sql="SELECT id FROM pms_brand WHERE id = %s",
+                params=(999,),
+                测试点="删除品牌后记录不存在"
+            )
+        """
+        # 选定 db 客户端：优先用入参 db，其次用初始化时传入的 self.db_client
+        db_client = db if db is not None else self.db_client
+        if db_client is None:
+            logger.error(f"[{测试点}] 数据库断言失败: 未提供 db_client")
+            assert False, f"[{测试点}] 未提供 db_client，无法执行数据库断言"
+
+        logger.debug(f"[{测试点}] 开始数据库记录不存在断言, SQL={sql}, params={params}")
+
+        # 查询单条记录
+        record = db_client.fetchone(sql, params)
+
+        # 查询结果不为 None：记录已存在，断言失败（不应存在）
+        if record is not None:
+            logger.error(
+                f"[{测试点}] 数据库记录不存在断言失败: 记录已存在(不应存在), "
+                f"SQL={sql}, params={params}, 实际记录={record}"
+            )
+            assert False, \
+                f"[{测试点}] 记录已存在(不应存在), SQL={sql}, params={params}, 实际记录={record}"
+
+        # 查询结果为 None：记录不存在，符合预期，通过
+        logger.info(f"[{测试点}] 数据库记录不存在断言通过, SQL={sql}, params={params}")
